@@ -6,6 +6,7 @@ from core.models import User as DBUser
 from core.auth import pwd_context
 import os
 from .base import success_response, error_response
+from pydantic import BaseModel
 router = APIRouter(prefix="/user", tags=["用户管理"])
 
 @router.get("", summary="获取用户信息")
@@ -178,6 +179,78 @@ async def add_user(
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail=f"用户添加失败: {str(e)}"
+        )
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+@router.put("/password", summary="修改密码")
+async def change_password(
+    password_data: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user_or_ak)
+):
+    """修改用户密码"""
+    session = DB.get_session()
+    try:
+        # 获取用户
+        user = session.query(DBUser).filter(
+            DBUser.username == current_user["username"]
+        ).first()
+        if not user:
+            from .base import error_response
+            print(f"[debug] user NOT FOUND in DB")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_response(
+                    code=40401,
+                    message="用户不存在"
+                )
+            )
+            
+        # 验证旧密码
+        if not pwd_context.verify(password_data.old_password, user.password_hash):
+            from .base import error_response
+            raise HTTPException(
+                status_code=status.HTTP_200_OK,
+                detail=error_response(
+                    code=40003,
+                    message="旧密码不正确"
+                )
+            )
+            
+        # 验证新密码复杂度
+        new_password = password_data.new_password
+        if len(new_password) < 8:
+            from .base import error_response
+            raise HTTPException(
+                status_code=status.HTTP_200_OK,
+                detail=error_response(
+                    code=40004,
+                    message="密码长度不能少于8位"
+                )
+            )
+            
+        # 更新密码
+        user.password_hash = pwd_context.hash(new_password)
+        user.updated_at = datetime.now()
+        session.commit()
+        session.expire(user)
+        # 清除用户缓存，确保新密码立即生效
+        from core.auth import clear_user_cache
+        clear_user_cache(current_user["username"])
+        
+        from .base import success_response
+        return success_response(message="密码修改成功")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_406_NOT_ACCEPTABLE,
+            detail=f"密码修改失败: {str(e)}"
         )
 
 @router.put("/{user_id}", summary="更新用户信息")
@@ -419,82 +492,6 @@ async def update_user_info(
         )
    
 
-@router.put("/password", summary="修改密码")
-async def change_password(
-    password_data: dict,
-    current_user: dict = Depends(get_current_user_or_ak)
-):
-    """修改用户密码"""
-    session = DB.get_session()
-    try:
-        # 验证请求数据
-        if "old_password" not in password_data or "new_password" not in password_data:
-            from .base import error_response
-            raise HTTPException(
-                status_code=status.HTTP_200_OK,
-                detail=error_response(
-                    code=40001,
-                    message="需要提供旧密码和新密码"
-                )
-            )
-            
-        # 获取用户
-        user = session.query(DBUser).filter(
-            DBUser.username == current_user["username"]
-        ).first()
-        if not user:
-            from .base import error_response
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=error_response(
-                    code=40401,
-                    message="用户不存在"
-                )
-            )
-            
-        # 验证旧密码
-        if not pwd_context.verify(password_data["old_password"], user.password_hash):
-            from .base import error_response
-            raise HTTPException(
-                status_code=status.HTTP_200_OK,
-                detail=error_response(
-                    code=40003,
-                    message="旧密码不正确"
-                )
-            )
-            
-        # 验证新密码复杂度
-        new_password = password_data["new_password"]
-        if len(new_password) < 8:
-            from .base import error_response
-            raise HTTPException(
-                status_code=status.HTTP_200_OK,
-                detail=error_response(
-                    code=40004,
-                    message="密码长度不能少于8位"
-                )
-            )
-            
-        # 更新密码
-        user.password_hash = pwd_context.hash(new_password)
-        user.updated_at = datetime.now()
-        session.commit()
-        session.expire(user)
-        # 清除用户缓存，确保新密码立即生效
-        from core.auth import clear_user_cache
-        clear_user_cache(current_user["username"])
-        
-        from .base import success_response
-        return success_response(message="密码修改成功")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_406_NOT_ACCEPTABLE,
-            detail=f"密码修改失败: {str(e)}"
-        )
 @router.post("/avatar", summary="上传用户头像")
 async def upload_avatar(
     file: UploadFile = File(...),

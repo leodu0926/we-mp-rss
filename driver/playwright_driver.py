@@ -50,7 +50,7 @@ class PlaywrightController:
     """
 
     def __init__(self, headless: bool = None,
-                 browser_type: str = "webkit",
+                 browser_type: str = "chromium",
                  proxy_url: Optional[str] = "",
                  user_agent: Optional[str] = None,
                  debug: bool = False,
