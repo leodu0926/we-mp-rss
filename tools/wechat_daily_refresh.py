@@ -10,11 +10,21 @@ import time
 import subprocess
 import json
 
-SRC_DIR = '/home/leo/.hermes/profiles/linus/workspace/we-mp-rss/src'
+SRC_DIR = '/home/leo/.hermes/profiles/linus/workspace/we-mp-rss.bak/src'
 VENV_PYTHON = os.path.join(SRC_DIR, 'venv', 'bin', 'python3')
 QR_FILE = os.path.join(SRC_DIR, 'static', 'wx_qrcode.png')
 ADMIN_USER = "admin"
-ADMIN_PASS = "admin@123"
+# 从环境变量读取密码（不在 git 中保存）
+# 优先从环境变量读取，其次从 .credentials.json
+import json
+_creds_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.credentials.json')
+ADMIN_PASS = os.environ.get('WERSS_ADMIN_PASS', '')
+if not ADMIN_PASS and os.path.exists(_creds_file):
+    try:
+        with open(_creds_file) as _f:
+            ADMIN_PASS = json.load(_f).get('admin_pass', '')
+    except Exception:
+        pass
 
 # ---------- 1. 获取管理员 token ----------
 login_resp = subprocess.run(

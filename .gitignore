@@ -1,9 +1,11 @@
-config.yaml
-config-node.yaml
-.env
-data/
+src/
 __pycache__/
 *.pyc
+.env
+config.yaml
+data/
 venv/
-.env.example
-static/wx_qrcode.png
+.DS_Store
+
+# Secret credentials
+.credentials.json
