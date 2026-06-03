@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-WeRSS \u5e7f\u544a\u6587\u7ae0\u81ea\u52a8\u6e05\u7406\u811a\u672c
-\u6309 description/title \u8fc7\u6ee4\u5e7f\u544a\u6587\u7ae0\uff0c\u6807\u8bb0\u5220\u9664
-\u6b63\u5e38\u65f6\u9759\u9ed8\uff0c\u6709\u5220\u9664\u65f6\u8f93\u51fa\u6458\u8981
+WeRSS 广告文章自动清理脚本
+按 description/title 过滤广告文章，标记删除
+正常时静默，有删除时输出摘要
 """
 
 import sys, re, sqlite3, json, os
@@ -10,38 +10,50 @@ import sys, re, sqlite3, json, os
 DB_PATH = '/home/leo/.hermes/profiles/linus/workspace/we-mp-rss.bak/src/data/db.db'
 STATUS_DELETED = 1000
 
-# \u89c4\u5219\uff1a(mp_id, field, pattern, mode, reason)
-# mode: 'eq' = \u7cbe\u786e\u5339\u914d, 're' = \u6b63\u5219\u5339\u914d
+# 规则：(mp_id, field, pattern, mode, reason)
+# mode: 'eq' = 精确匹配, 're' = 正则匹配
 RULES = [
-    # ===== \u5927\u5b9d\u7ad9\u5916\u63a8\u5e7f =====
-    ("MP_WXS_3862012093", "description", "\u7cbe\u7ec6\u5316\u8fd0\u8425\u5de5\u51772026\u5e74\u4e9a\u9a6c\u900a\u5356\u5bb6\u5fc5\u5907", "eq",
-     "\u5e7f\u544a\uff1a\u5de5\u5177\u63a8\u8350"),
-    ("MP_WXS_3862012093", "title", "\u5de5\u5177.*[0-9]+\u9009|\u9009\u4e00", "re",
-     "\u5e7f\u544a\uff1a\u5de5\u5177\u9009\u4e00"),
+    # ===== 大宝站外推广 =====
+    ("MP_WXS_3862012093", "description", "精细化运营工具2026年亚马逊卖家必备", "eq",
+     "广告：工具推荐"),
+    ("MP_WXS_3862012093", "title", "工具.*[0-9]+选|选一", "re",
+     "广告：工具选一"),
 
-    # ===== \u77e5\u4e0d\u8a00 =====
-    # \u6df1\u5733\u7ebf\u4e0b\u6d3b\u52a8\u63a8\u5e7f
+    # ===== 知无不言 =====
+    # 深圳线下活动推广
     ("MP_WXS_3888889046", "description",
-     "\u6df1\u5733\u00b7\u5b9d\u5b89\u4e28\u4e3a\u4fdd\u969c\u6d3b\u52a8\u8d28\u91cf\uff0c\u672c\u6d3b\u52a8\u4ec5\u9650\u5356\u5bb6\u53c2\u4e0e\uff0c\u8c22\u7edd\u670d\u52a1\u5546/\u7b2c\u4e09\u673a\u6784\u3002",
-     "eq", "\u5e7f\u544a\uff1a\u6df1\u5733\u7ebf\u4e0b\u6d3b\u52a8\u63a8\u5e7f"),
-    # \u514d\u8d39\u62a5\u540d\u6d3b\u52a8\u63a8\u5e7f
+     "深圳·宝安丨为保障活动质量，本活动仅限卖家参与，谢绝服务商/第三机构。",
+     "eq", "广告：深圳线下活动推广"),
+    # 免费报名活动推广
     ("MP_WXS_3888889046", "description",
-     "\u529e\u516c\u6905\u3001\u7535\u7ade\u6905\u3001\u529f\u80fd\u6c99\u53d1\u2026\u2026\u5750\u5177\u7c7b\u6838\u5fc3\u4ea7\u54c1\u5168\u8986\u76d6",
-     "eq", "\u5e7f\u544a\uff1a\u514d\u8d39\u62a5\u540d\u6d3b\u52a8\u63a8\u5e7f"),
-    # \u4ed8\u8d39\u8bfe\u7a0b\u63a8\u5e7f
+     "办公椅、电竞椅、功能沙发……坐具类核心产品全覆盖",
+     "eq", "广告：免费报名活动推广"),
+    # 付费课程推广
     ("MP_WXS_3888889046", "description",
-     "\u4e9a\u9a6c\u900a\u4ebf\u7ea7\u64cd\u76d8\u624b\u4eb2\u6388\u7684\u6d41\u91cf\u65b9\u6cd5\u8bba",
-     "eq", "\u5e7f\u544a\uff1a\u4ed8\u8d39\u8bfe\u7a0b\u63a8\u5e7f"),
-    # \u6807\u9898\u89c4\u5219
-    ("MP_WXS_3888889046", "title", "\u5012\u8ba1\u65f6.*\u5929", "re",
-     "\u5e7f\u544a\uff1a\u6d3b\u52a8\u5012\u8ba1\u65f6"),
-    ("MP_WXS_3888889046", "title", "\u5f00\u653e\u9ea6", "re",
-     "\u5e7f\u544a\uff1a\u5f00\u653e\u9ea6\u6d3b\u52a8"),
-    ("MP_WXS_3888889046", "title", "\u62db\u8058|\u6c42\u804c|\u62db\u52df", "re",
-     "\u5e7f\u544a\uff1a\u62db\u8058"),
+     "亚马逊亿级操盘手亲授的流量方法论",
+     "eq", "广告：付费课程推广"),
+    # 标题规则
+    ("MP_WXS_3888889046", "title", "倒计时.*天", "re",
+     "广告：活动倒计时"),
+    ("MP_WXS_3888889046", "title", "开放麦", "re",
+     "广告：开放麦活动"),
+    ("MP_WXS_3888889046", "title", "招聘|求职|招募", "re",
+     "广告：招聘"),
     ("MP_WXS_3888889046", "title",
-     "\u9ea6\u591a|coconut\\.is|Nano Banana|\u4f9b\u5e94\u94fe\u8d44\u6e90\u5bf9\u63a5",
-     "re", "\u5e7f\u544a\uff1a\u4ea7\u54c1\u63a8\u5e7f"),
+     "麦多|coconut\.is|Nano Banana|供应链资源对接",
+     "re", "广告：产品推广"),
+    # description 以 ⏰ 开头 - 活动/课程推广
+    ("MP_WXS_3888889046", "description", "^⏰", "re",
+     "广告：活动/课程推广"),
+    # 标题含展会关键词
+    ("MP_WXS_3888889046", "title", "跨博会|跨交会|跨境节|年度盛会", "re",
+     "广告：展会宣传"),
+    # 标题含 SellersX
+    ("MP_WXS_3888889046", "title", "SellersX", "re",
+     "广告：活动推广"),
+    # 分享图片 - 废文
+    ("MP_WXS_3888889046", "title", "分享图片", "eq",
+     "广告：废文"),
 ]
 
 conn = sqlite3.connect(DB_PATH)
@@ -73,7 +85,7 @@ conn.commit()
 conn.close()
 
 if total_deleted > 0:
-    print(f"[\u6e05\u7406] \u5171\u5220\u9664 {total_deleted} \u7bc7\u5e7f\u544a\u6587\u7ae0")
+    print(f"[清理] 共删除 {total_deleted} 篇广告文章")
     for t in deleted_titles:
         print(t)
 else:
