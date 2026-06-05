@@ -233,7 +233,11 @@ def add_job(feeds:list[Feed]=None,task:MessageTask=None,isTest=False):
 import json
 def get_feeds(task:MessageTask=None):
      mps = json.loads(task.mps_id) if task.mps_id else []
-     ids=",".join([item["id"]for item in mps])
+     # 兼容两种格式：直接是 feed ID 字符串列表，或 dict 列表（含 "id" 键）
+     if mps and isinstance(mps[0], dict):
+         ids=",".join([item["id"]for item in mps])
+     else:
+         ids=",".join(mps)
      mps=wx_db.get_mps_list(ids)
      if len(mps)==0:
         mps=wx_db.get_all_mps()

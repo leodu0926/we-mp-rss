@@ -352,7 +352,11 @@ class CascadeTaskDispatcher:
         session = DB.get_session()
         try:
             mps_list = json.loads(task.mps_id) if task.mps_id else []
-            feed_ids = [mp["id"] for mp in mps_list]
+            # 兼容两种格式：直接是 feed ID 字符串列表，或 dict 列表（含 "id" 键）
+            if mps_list and isinstance(mps_list[0], dict):
+                feed_ids = [mp["id"] for mp in mps_list]
+            else:
+                feed_ids = mps_list
 
             feeds = session.query(Feed).filter(Feed.id.in_(feed_ids)).all()
 
