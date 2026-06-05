@@ -49,6 +49,11 @@ cyChaos, 子健MeLift, 晨阳, 童总, 胜宇, 军亮, 余光, 一路向北, 水
     <a href="https://discord.gg/followapp" target="_blank"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2Ffollowapp%3Fwith_counts%3Dtrue&query=approximate_member_count&color=5865F2&label=Discord&labelColor=black&logo=discord&logoColor=white&style=flat-square"/></a>
     <br />
 A tool for subscribing to and managing WeChat Official Account content, providing RSS subscription functionality.
+
+> **🔀 This is leodu0926's fork** — includes custom ad filtering and RSS proxy enhancements on the `custom/ads-filter` branch.
+>
+> ✅ **RSS Proxy with Real-Time Ad Filtering** — automated ad removal from RSS output and database.
+> ✅ **Bug fixes** — `mps_id` parsing compatibility for the task scheduler.
 </div>
 <p align="center">
   <a href="https://github.com/DIYgod/sponsors">
