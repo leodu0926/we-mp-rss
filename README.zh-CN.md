@@ -224,13 +224,23 @@ python3 tools/wechat_daily_refresh.py
 - 登录 Token 获取失败时自动重试 3 次（间隔 5 秒）
 - 二维码生成后通过 MEDIA 路径交付
 
+## Hermes Agent cron 配置
+
+这两个脚本作为 Hermes Agent 定时任务运行：
+
+| 脚本 | 模式 | 调度 |
+|------|------|------|
+| `wechat_watchdog.py` | `no_agent`（直接执行） | 每 30 分钟 |
+| `wechat_daily_refresh.py` | agent 模式（通过 `terminal()` 执行） | 工作日 10:30 |
+
+> **注意**：`wechat_daily_refresh.py` 使用 agent 模式而非 no_agent 模式，因为 no_agent 环境下脚本的登录 Token 获取存在环境差异。agent 模式下通过 Hermes 的 `terminal()` 工具执行，可正确获取管理员 Token。
+
 ## 注意事项
 
 - 依赖 Playwright + Firefox 生成二维码，首次使用需安装浏览器：
   ```bash
   playwright install firefox
   ```
-- 这两个脚本设计为 Hermes Agent cron 任务运行（no_agent 模式）。
 - 管理员密码通过 `WERSS_ADMIN_PASS` 环境变量或 `tools/.credentials.json` 配置。
 | `CACHE.DIR` | `./data/cache` | 缓存目录 |
 | `ARTICLE.TRUE_DELETE` | `False` | 是否真实删除文章 |

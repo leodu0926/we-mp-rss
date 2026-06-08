@@ -262,8 +262,53 @@ The following are the environment variable configurations supported in `config.y
 | `SAFE_HIDE_CONFIG` | `db,secret,token,notice.wechat,notice.feishu,notice.dingding` | Configuration information to hide |
 | `SAFE_LIC_KEY` | `RACHELOS` | Authorization encryption key |
 | `LOG_FILE` | Empty | Log file path |
-| `LOG_LEVEL` | `INFO` | Log level |
+|| `LOG_LEVEL` | `INFO` | Log level |
 | `EXPORT_PDF` | `False` | Whether to enable PDF export functionality |
+
+# Login Monitoring Scripts
+
+Two utility scripts are provided for WeChat login session management:
+
+## wechat_watchdog.py (Login Monitor)
+
+Checks WeChat login status every 30 minutes. Generates a QR code for re-authorization when the session has expired.
+
+```bash
+python3 tools/wechat_watchdog.py
+```
+
+- Login valid → Silent exit (no output)
+- Login expired → Outputs QR code image path for cron delivery to user
+
+## wechat_daily_refresh.py (Daily QR Refresh)
+
+Actively generates a QR code on weekdays at 10:30 to prevent session expiration.
+
+```bash
+python3 tools/wechat_daily_refresh.py
+```
+
+- Retries up to 3 times (5-second interval) on token acquisition failure
+- Delivers QR code via MEDIA path
+
+## Hermes Agent Cron Configuration
+
+These scripts run as Hermes Agent cron jobs:
+
+| Script | Mode | Schedule |
+|--------|------|----------|
+| `wechat_watchdog.py` | `no_agent` (direct execution) | Every 30 minutes |
+| `wechat_daily_refresh.py` | agent mode (via `terminal()`) | Weekdays 10:30 |
+
+> **Note**: `wechat_daily_refresh.py` uses agent mode instead of no_agent mode because the login token acquisition has environment differences in the no_agent context. With agent mode, the script runs through Hermes' `terminal()` tool and can correctly obtain the admin token.
+
+## Notes
+
+- Requires Playwright + Firefox to generate QR codes. On first use, install the browser:
+  ```bash
+  playwright install firefox
+  ```
+- Admin password is configured via the `WERSS_ADMIN_PASS` environment variable or `tools/.credentials.json`.
 
 
 
