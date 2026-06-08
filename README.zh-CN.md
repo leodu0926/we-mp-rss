@@ -197,6 +197,41 @@ http://localhost:3000
 | `RSS_CDATA` | `False` | 是否启用CDATA |
 | `RSS_PAGE_SIZE` | `30` | RSS分页大小 |
 | `TOKEN_EXPIRE_MINUTES` | `4320` | 登录会话有效时长（分钟） |
+
+# 登录监控脚本
+
+项目提供了两个工具脚本用于微信公众平台登录会话管理：
+
+## wechat_watchdog.py（登录监控）
+
+每 30 分钟检查微信登录状态，登录过期时自动生成二维码通知用户扫码续期。
+
+```bash
+python3 tools/wechat_watchdog.py
+```
+
+- 登录有效 → 静默退出（无输出）
+- 登录过期 → 输出二维码图片路径，供 cron 交付系统发送给用户
+
+## wechat_daily_refresh.py（每日扫码提醒）
+
+工作日 10:30 主动生成二维码，提醒用户扫码刷新 session，防止登录过期。
+
+```bash
+python3 tools/wechat_daily_refresh.py
+```
+
+- 登录 Token 获取失败时自动重试 3 次（间隔 5 秒）
+- 二维码生成后通过 MEDIA 路径交付
+
+## 注意事项
+
+- 依赖 Playwright + Firefox 生成二维码，首次使用需安装浏览器：
+  ```bash
+  playwright install firefox
+  ```
+- 这两个脚本设计为 Hermes Agent cron 任务运行（no_agent 模式）。
+- 管理员密码通过 `WERSS_ADMIN_PASS` 环境变量或 `tools/.credentials.json` 配置。
 | `CACHE.DIR` | `./data/cache` | 缓存目录 |
 | `ARTICLE.TRUE_DELETE` | `False` | 是否真实删除文章 |
 | `GATHER.CONTENT` | `True` | 是否采集内容 |

@@ -36,21 +36,20 @@ check_code = (
     "sys.path.insert(0, os.getcwd());"
     "from driver.success import getStatus, getLoginInfo;"
     "s = getStatus();"
+    "info = (getLoginInfo() or {}).get('expiry', {}) or {};"
+    "rem = info.get('remaining_seconds', 0) if s else 0;"
     "print('OK' if s else 'EXPIRED', end='');"
-    "if s:"
-    "  info = getLoginInfo() or {};"
-    "  exp = info.get('expiry', {}) or {};"
-    "  rem = exp.get('remaining_seconds', 0);"
-    "  print(f'|{rem}');"
-    "else: print();"
+    "print(f'|{rem}' if s else '');"
 )
 proc = subprocess.run(
     [VENV_PYTHON, '-c', check_code],
     capture_output=True, text=True, timeout=30
 )
 status_line = proc.stdout.strip()
+# 检查末尾是否有 EXPIRED 状态（开头可能有启动信息）
+is_expired = status_line.endswith('EXPIRED')
 
-if not status_line.startswith('EXPIRED'):
+if not is_expired:
     sys.exit(0)
 
 # 登录已过期

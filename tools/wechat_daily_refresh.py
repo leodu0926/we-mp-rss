@@ -16,7 +16,6 @@ QR_FILE = os.path.join(SRC_DIR, 'static', 'wx_qrcode.png')
 ADMIN_USER = "admin"
 # 从环境变量读取密码（不在 git 中保存）
 # 优先从环境变量读取，其次从 .credentials.json
-import json
 _creds_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.credentials.json')
 ADMIN_PASS = os.environ.get('WERSS_ADMIN_PASS', '')
 if not ADMIN_PASS and os.path.exists(_creds_file):
@@ -26,19 +25,37 @@ if not ADMIN_PASS and os.path.exists(_creds_file):
     except Exception:
         pass
 
-# ---------- 1. 获取管理员 token ----------
-login_resp = subprocess.run(
-    ['curl', '-s', '-X', 'POST',
-     'http://localhost:8001/api/v1/wx/auth/login',
-     '-H', 'Content-Type: application/x-www-form-urlencoded',
-     '-d', f'username={ADMIN_USER}&password={ADMIN_PASS}'],
-    capture_output=True, text=True, timeout=15
-)
-try:
-    token_data = json.loads(login_resp.stdout)
-    admin_token = token_data['data']['access_token']
-except Exception:
-    print("⚠️ 获取管理员 Token 失败，跳过每日扫码刷新")
+# ---------- 1. 获取管理员 token（带重试） ----------
+MAX_RETRIES = 3
+RETRY_DELAY = 5  # seconds
+
+admin_token = None
+for attempt in range(1, MAX_RETRIES + 1):
+    if attempt > 1:
+        print(f"   🔄 第 {attempt} 次重试...")
+        time.sleep(RETRY_DELAY)
+
+    login_resp = subprocess.run(
+        ['curl', '-s', '-X', 'POST',
+         'http://localhost:8001/api/v1/wx/auth/login',
+         '-H', 'Content-Type: application/x-www-form-urlencoded',
+         '-d', f'username={ADMIN_USER}&password={ADMIN_PASS}'],
+        capture_output=True, text=True, timeout=15
+    )
+    try:
+        token_data = json.loads(login_resp.stdout)
+        admin_token = token_data['data']['access_token']
+        break  # 成功获取，跳出重试
+    except Exception as e:
+        print(f"⚠️ 获取管理员 Token 失败 (尝试 {attempt}/{MAX_RETRIES}): {e}")
+        if login_resp.stdout.strip():
+            print(f"   响应内容: {login_resp.stdout[:300]}")
+        if login_resp.stderr.strip():
+            print(f"   错误输出: {login_resp.stderr[:300]}")
+        print(f"   退出码: {login_resp.returncode}")
+
+if admin_token is None:
+    print("❌ 重试耗尽，放弃刷新")
     sys.exit(1)
 
 # ---------- 2. 触发二维码生成 ----------
