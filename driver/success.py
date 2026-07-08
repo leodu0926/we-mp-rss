@@ -45,29 +45,24 @@ def getStatus():
                 token_data = getLoginInfo()
                 if token_data and 'expiry' in token_data and token_data['expiry']:
                     expiry = token_data['expiry']
-                    # 检查剩余秒数
+                    # 优先检查过期时间戳（绝对时间，可准确比较）
+                    if 'expiry_timestamp' in expiry:
+                        expiry_timestamp = expiry['expiry_timestamp']
+                        if expiry_timestamp and expiry_timestamp >= time.time():
+                            return True
+                        else:
+                            print_warning("Token已过期，需要重新登录")
+                            setStatus(False)
+                            return False
+                    # 回退到剩余秒数检查（兼容旧token数据）
                     if 'remaining_seconds' in expiry:
                         remaining = expiry['remaining_seconds']
                         if remaining is not None and remaining > 0:
                             return True
                         else:
-                            # token已过期，更新状态
                             print_warning("Token已过期，需要重新登录")
                             setStatus(False)
                             return False
-                    # 检查过期时间戳
-                    elif 'expiry_timestamp' in expiry:
-                        expiry_timestamp = expiry['expiry_timestamp']
-                        # 过期时间戳 >= 当前时间，说明还没过期
-                        if expiry_timestamp and expiry_timestamp >= time.time():
-                            return True
-                        else:
-                            # token已过期，更新状态
-                            print_warning("Token已过期，需要重新登录")
-                            setStatus(False)
-                            return False
-                # 没有过期信息，但状态为True，暂时返回True
-                return True
         except Exception as e:
             print_warning(f"检查登录状态失败: {e}")
             pass
@@ -125,17 +120,17 @@ def CanGetToken():
     # 检查过期信息
     expiry = token_data.get('expiry')
     if expiry:
-        # 检查剩余秒数
-        if 'remaining_seconds' in expiry:
-            remaining = expiry['remaining_seconds']
-            if remaining is not None and remaining <= 0:
+        # 优先检查过期时间戳（绝对时间，可准确比较）
+        if 'expiry_timestamp' in expiry:
+            expiry_timestamp = expiry['expiry_timestamp']
+            if expiry_timestamp and expiry_timestamp <= time.time():
                 print_warning("Token已过期，请重新扫码登录")
                 setStatus(False)
                 return False
-        # 检查过期时间戳
-        elif 'expiry_timestamp' in expiry:
-            expiry_timestamp = expiry['expiry_timestamp']
-            if expiry_timestamp and expiry_timestamp <= time.time():
+        # 回退到剩余秒数检查（兼容旧token数据）
+        elif 'remaining_seconds' in expiry:
+            remaining = expiry['remaining_seconds']
+            if remaining is not None and remaining <= 0:
                 print_warning("Token已过期，请重新扫码登录")
                 setStatus(False)
                 return False

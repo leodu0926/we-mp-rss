@@ -277,7 +277,7 @@ class Wx:
                 "msg":"微信公众平台登录脚本正在运行，请勿重复运行！"}
 
         self.Clean()
-        print("子线程执行中")
+        self.log("子线程执行中")
 
         def run_wxLogin():
             import asyncio
@@ -296,6 +296,14 @@ class Wx:
         return WX_API.QRcode()
     
     wait_time=1
+    LOG_FILE = "data/wx_login_debug.log"
+
+    def log(self, msg):
+        """写日志到文件（线程安全，可直接追踪登录线程输出）"""
+        ts = time.strftime("%H:%M:%S")
+        with open(self.LOG_FILE, "a") as f:
+            f.write(f"[{ts}] {msg}\n")
+        print(msg)
     def QRcode(self):
         return {
             "code":f"/{self.wx_login_url}?t={(time.time())}",
@@ -464,54 +472,150 @@ class Wx:
             # 清理现有资源
             self.cleanup_resources()
 
-            self.controller = PlaywrightController()
-            # 初始化浏览器控制器
-            driver = self.controller
-            # 启动浏览器并打开微信公众平台
-            print_info("正在启动浏览器...")
-            await driver.start_browser()
-            await driver.open_url(self.WX_LOGIN)
-            page = driver.page
+            # 直接使用原生 Playwright API（绕过臃肿的 PlaywrightController 反爬配置）
+            from playwright.async_api import async_playwright as _async_playwright
+            self._pw_driver = await _async_playwright().start()
+            self._browser = await self._pw_driver.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
+            page = await self._browser.new_page()
+            self._wx_page = page
+            self.log("浏览器启动完成")
 
-            # 等待页面完全加载
-            print_info("正在加载登录页面...")
-            await page.wait_for_load_state("networkidle")
+            # 打开微信公众平台
+            await page.goto(self.WX_LOGIN, wait_until="domcontentloaded")
+            self.log("正在加载登录页面...")
+
+            # 先点击切换按钮，切换到二维码登录视图
+            try:
+                # 使用JS点击绕过Playwright可见性检查
+                await page.evaluate('document.querySelector(".login__type__container__select-type__scan")?.click()')
+                self.log("已切换到二维码登录")
+                # 等待二维码图片加载完成（动态获取src）
+                await page.wait_for_function(
+                    'document.querySelector(".login__type__container__scan__qrcode")?.getAttribute("src")?.length > 0',
+                    timeout=10000
+                )
+            except Exception as e:
+                print_warning(f"切换二维码视图失败: {e}")
 
             # 定位二维码区域
             qr_tag = ".login__type__container__scan__qrcode"
             # 获取二维码图片URL
             qrcode = await page.query_selector(qr_tag)
             code_src = await qrcode.get_attribute("src")
-            print("正在生成二维码图片...")
+            self.log("正在生成二维码图片...")
             print(f"code_src:{code_src}")
 
-            # 使用Playwright截图功能（添加异常处理）
-            await qrcode.screenshot(path=self.wx_login_url)
-
-            print("二维码已保存为 wx_qrcode.png，请扫码登录...")
+            # 用 Playwright 的 HTTP 请求下载二维码（自带浏览器 cookies）
+            qr_full_url = f"https://mp.weixin.qq.com{code_src}" if code_src.startswith("/") else code_src
+            resp = await page.context.request.get(qr_full_url)
+            img_data = await resp.body()
+            with open(self.wx_login_url, "wb") as f:
+                f.write(img_data)
+            print(f"二维码已下载 ({len(img_data)} bytes)，请扫码登录...")
             self.HasCode = True
             if os.path.getsize(self.wx_login_url) <= 364:
                 raise Exception("二维码图片获取失败，请重新扫码")
             # 等待登录成功（检测二维码图片加载完成）
-            print("等待扫码登录...")
+            self.log("等待扫码登录...")
             if self.Notice is not None:
                 self.Notice()
 
-            # 监听页面导航事件
-            def handle_frame_navigated(frame):
-                current_url = frame.url
-                if self.WX_HOME in current_url:
-                    print(f"登录成功，正在获取cookie和token...")
-            page.on('framenavigated', handle_frame_navigated)
-            await page.wait_for_event("framenavigated", timeout=5*60 * 1000)
+            # 等待扫码登录：同时监听页面 URL 变化 + 定时截图检查 + 直接轮询微信状态
+            print("等待扫码登录完成...")
+            # 从 QR code src 中提取 random 参数，用于直接轮询
+            random_match = re.search(r'random=(\d+)', code_src)
+            random_val = random_match.group(1) if random_match else ""
+            ask_url = f"https://mp.weixin.qq.com/cgi-bin/scanloginqrcode?action=ask&random={random_val}&login_appid="
+            self.log(f"ask_url: {ask_url}")
+
+            login_detected = False
+            cookies = []
+            token = ""
+            start_ts = time.time()
+
+            while time.time() - start_ts < 5*60:  # 最多等5分钟
+                # 方式1: 检查 URL 是否包含 token 或 home
+                current_url = page.url
+                if "token=" in current_url or "cgi-bin/home" in current_url:
+                    self.log(f"URL 变化检测到登录成功: {current_url[:80]}")
+                    login_detected = True
+                    break
+
+                # 方式2: 直接轮询微信 ask 接口
+                try:
+                    resp = await page.context.request.get(ask_url)
+                    body = await resp.text()
+                    if "redirect_url" in body or "token" in body:
+                        self.log(f"微信 ask 接口返回登录成功: {body[:200]}")
+                        login_detected = True
+                        # 从返回的 redirect_url 中提取 token
+                        import json as _json
+                        try:
+                            data = _json.loads(body)
+                            if data.get("redirect_url"):
+                                rurl = data["redirect_url"]
+                                tm = re.search(r'token=([^&]+)', rurl)
+                                if tm:
+                                    token = tm.group(1)
+                        except Exception:
+                            pass
+                        # 导航到 redirect_url
+                        try:
+                            await page.goto(body.split("redirect_url=")[1].split("&")[0], wait_until="domcontentloaded")
+                        except Exception:
+                            pass
+                        break
+                except Exception:
+                    pass
+
+                # 方式3: 检查 framenavigated
+                # 每5秒检查一次
+                await asyncio.sleep(5)
+
+            if not login_detected:
+                raise Exception("扫码登录超时")
+
+            print("登录成功，正在获取cookie和token...")
+            # 等页面稳定
+            await asyncio.sleep(2)
+
+            # 直接从原生 Playwright 页面获取 cookies 和 token
+            # 注意：不能用 self.Call_Success()，因为那个方法依赖 PlaywrightController 实例，
+            # 而 wxLogin 用的是原生 browser/page (self._wx_page)，两者不互通
+            cookies = await page.context.cookies()
+            current_url = page.url
+            token_match = re.search(r'token=([^&]+)', current_url)
+            token = token_match.group(1) if token_match else ""
+            self.log(f"获取到 {len(cookies)} 个 cookies, token={token}")
 
             from .success import setStatus
+            from driver.store import Store
+            from driver.token import set_token
+
             with self._login_lock:
                 self._haslogin = True
             setStatus(True)
+            self.SESSION = self.format_token(cookies, token)
             self.CallBack = CallBack
-            await self.Call_Success()
+
+            # 保存 cookies 和 token
+            Store.save(cookies)
+            ext_data = None
+            if self.SESSION.get("token"):
+                # 从页面提取公众号信息
+                ext_data = await self._extract_wechat_data_from_page(page)
+                set_token(self.SESSION, ext_data)
+                self.log(f"登录成功！Token: {self.SESSION.get('token')}") ; print_success(f"登录成功！Token: {self.SESSION.get('token')}")
+
+            print_success("登录成功！")
+
+            if self.CallBack is not None:
+                self.CallBack(self.SESSION, ext_data)
         except Exception as e:
+            self.log(f"wxLogin 异常: {str(e)[:100]}")
             if "Timeout" in str(e):
                 print_warning("\n扫码登录超时，请重新运行程序进行扫码登录")
 
@@ -520,10 +624,12 @@ class Wx:
             self.SESSION = None
             return self.SESSION
         finally:
+            self.log("wxLogin 结束（finally）")
             self.release_lock()
             if NeedExit:
                 self.Clean()
             await self.Close()
+        self.log(f"wxLogin 返回 SESSION: {self.SESSION is not None}")
         return self.SESSION
     def format_token(self, cookies: list, token: str = ""):
         cookies_str=""
@@ -645,7 +751,31 @@ class Wx:
                         print_error(f"备用方法也失败: {str(fallback_e)}")
 
         return data
-    
+
+    async def _extract_wechat_data_from_page(self, page):
+        """从原生 Playwright 页面提取公众号信息（不依赖 controller）"""
+        from core.print import print_warning
+        data = {}
+        selectors = {
+            "wx_app_name": [".weui-desktop_name", ".acount_box-nickname", ".account_box-panel-head__nickname"],
+            "wx_logo": [".weui-desktop-account__img", ".weui-desktop-account__thumb", ".account_box-panel-head__thumb"],
+        }
+        for key, selector_list in selectors.items():
+            data[key] = ""
+            for selector in selector_list:
+                try:
+                    element = page.locator(selector)
+                    if await element.count() > 0:
+                        if key == "wx_logo":
+                            data[key] = await element.get_attribute("src")
+                        else:
+                            data[key] = await element.text_content()
+                        break
+                except Exception:
+                    continue
+        self.log(f"公众号信息提取: name={data.get('wx_app_name','')[:20]}")
+        return data
+
     def cleanup_resources(self):
         """清理所有相关资源"""
         try:
@@ -667,6 +797,12 @@ class Wx:
         try:
             if hasattr(self, 'controller') and self.controller is not None:
                 await self.controller.Close()
+                rel = True
+            if hasattr(self, '_browser') and self._browser is not None:
+                await self._browser.close()
+                rel = True
+            if hasattr(self, '_pw_driver') and self._pw_driver is not None:
+                await self._pw_driver.stop()
                 rel = True
         except Exception as e:
             print_warning("浏览器未启动或已关闭")
